@@ -1,0 +1,35 @@
+name: WarmCompanion
+options:
+  bundleIdPrefix: com.warmcompanion
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+
+targets:
+  WarmCompanion:
+    type: application
+    platform: iOS
+    sources:
+      - path: WarmCompanion
+        excludes:
+          - "**/.DS_Store"
+    settings:
+      base:
+        INFOPLIST_GENERATION_MODE: GeneratedFile
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: 1
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        SWIFT_EMIT_LOC_STRINGS: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_STYLE: Automatic
+        PRODUCT_BUNDLE_IDENTIFIER: com.warmcompanion.app
+        SWIFT_VERSION: "5.0"
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "음성 인식을 위해 접근 권한이 필요합니다"
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "음성 채팅을 위해 마이크 접근 권한이 필요합니다"
