@@ -155,23 +155,8 @@ struct CallView: View {
             }
 
             // Profile
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: isOn
-                                ? [Color.orange.opacity(0.7), Color.pink.opacity(0.5)]
-                                : [Color.indigo.opacity(0.7), Color.blue.opacity(0.5)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 120, height: 120)
-                    .shadow(color: accentColor.opacity(phase == .connected ? 0.3 : 0.1), radius: 20)
-
-                Text(viewModel.companionEmoji)
-                    .font(.system(size: 56))
-            }
+            CompanionProfileView(companion: viewModel.companion, size: 120)
+                .shadow(color: accentColor.opacity(phase == .connected ? 0.3 : 0.1), radius: 20)
         }
     }
 

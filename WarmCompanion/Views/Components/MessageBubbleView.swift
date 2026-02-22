@@ -3,6 +3,7 @@ import SwiftUI
 struct MessageBubbleView: View {
     let message: Message
     let companionName: String
+    let companion: CompanionType
     let showTimestamp: Bool
     let showProfile: Bool
     let isStreaming: Bool
@@ -49,20 +50,7 @@ struct MessageBubbleView: View {
         HStack(alignment: .top, spacing: 8) {
             // Profile
             if showProfile {
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.orange.opacity(0.5), Color.pink.opacity(0.3)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 36, height: 36)
-
-                    Text("🤗")
-                        .font(.system(size: 18))
-                }
+                CompanionProfileView(companion: companion, size: 36)
             } else {
                 Color.clear
                     .frame(width: 36, height: 36)
@@ -190,14 +178,16 @@ extension View {
         MessageBubbleView(
             message: Message(content: "오늘 회사에서 또 혼났어", isFromUser: true),
             companionName: "온",
+            companion: .on,
             showTimestamp: true,
             showProfile: false,
             isStreaming: false
         )
-        
+
         MessageBubbleView(
             message: Message(content: "또 혼났구나... 그런 날은 진짜 기운 빠지지. 무슨 일이었어?", isFromUser: false),
             companionName: "온",
+            companion: .on,
             showTimestamp: true,
             showProfile: true,
             isStreaming: false

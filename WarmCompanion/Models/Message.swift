@@ -108,6 +108,26 @@ enum CompanionType: String, Codable, CaseIterable, Identifiable {
         case .dam: return ["indigo", "blue"]
         }
     }
+
+    /// 프로필 이미지 이름 (Assets.xcassets)
+    var profileImageName: String {
+        switch self {
+        case .on: return "on_profile_2"   // 클로즈업 윙크
+        case .dam: return ""              // 아직 없음 → emoji fallback
+        }
+    }
+
+    /// 프로필 이미지 목록 (여러 장)
+    var profileImageNames: [String] {
+        switch self {
+        case .on: return ["on_profile_1", "on_profile_2", "on_profile_3"]
+        case .dam: return []
+        }
+    }
+
+    var hasProfileImage: Bool {
+        !profileImageName.isEmpty
+    }
 }
 
 // MARK: - Memory (Long-term)

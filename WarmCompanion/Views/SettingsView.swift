@@ -33,21 +33,7 @@ struct SettingsView: View {
                             viewModel.companion = type
                         } label: {
                             HStack(spacing: 14) {
-                                ZStack {
-                                    Circle()
-                                        .fill(
-                                            LinearGradient(
-                                                colors: type == .on
-                                                    ? [Color.orange.opacity(0.6), Color.pink.opacity(0.4)]
-                                                    : [Color.indigo.opacity(0.6), Color.blue.opacity(0.4)],
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            )
-                                        )
-                                        .frame(width: 50, height: 50)
-                                    Text(type.emoji)
-                                        .font(.system(size: 24))
-                                }
+                                CompanionProfileView(companion: type, size: 50)
 
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(type.displayName)

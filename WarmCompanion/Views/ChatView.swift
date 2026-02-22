@@ -41,20 +41,7 @@ struct ChatView: View {
     private var chatHeader: some View {
         HStack(spacing: 12) {
             // Profile image
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.orange.opacity(0.6), Color.pink.opacity(0.4)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 40, height: 40)
-                
-                Text("🤗")
-                    .font(.system(size: 20))
-            }
+            CompanionProfileView(companion: viewModel.companion, size: 40)
             
             VStack(alignment: .leading, spacing: 2) {
                 Text(viewModel.companionName)
@@ -117,6 +104,7 @@ struct ChatView: View {
                         MessageBubbleView(
                             message: message,
                             companionName: viewModel.companionName,
+                            companion: viewModel.companion,
                             showTimestamp: showTimestamp,
                             showProfile: showProfile,
                             isStreaming: viewModel.isStreaming && index == viewModel.messages.count - 1 && !message.isFromUser,
