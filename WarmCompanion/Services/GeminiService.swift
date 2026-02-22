@@ -4,8 +4,11 @@ import Foundation
 actor GeminiService {
     
     // MARK: - System Prompt (위로 & 수용 전문 AI 컴패니언)
-    private let systemPrompt = """
-    너는 사용자의 따뜻한 친구야. 이름은 "온"이야.
+    private var systemPrompt: String {
+        let saved = UserDefaults.standard.string(forKey: "selectedCompanion") ?? "on"
+        let comp = CompanionType(rawValue: saved) ?? .on
+        return """
+    너는 사용자의 따뜻한 친구야. 이름은 "\(comp.displayName)"이야.
 
     ## 너의 역할
     - 사용자의 이야기를 진심으로 들어주는 따뜻한 존재
@@ -64,7 +67,8 @@ actor GeminiService {
     - 사용자가 이전에 말한 내용을 기억하고 언급해줘
     - "지난번에 말한 그 일은 어떻게 됐어?" 같은 자연스러운 관심
     """
-    
+    }
+
     // MARK: - Conversation History
     private var conversationHistory: [[String: Any]] = []
     private let maxHistoryCount = 20  // 최근 20개 메시지 유지

@@ -67,6 +67,49 @@ struct EmotionEntry: Identifiable, Codable {
     }
 }
 
+// MARK: - Companion Type
+enum CompanionType: String, Codable, CaseIterable, Identifiable {
+    case on = "on"      // 온 (여성, 따뜻한)
+    case dam = "dam"    // 담 (남성, 포근한)
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .on: return "온"
+        case .dam: return "담"
+        }
+    }
+
+    var emoji: String {
+        switch self {
+        case .on: return "\u{1F917}"  // 🤗
+        case .dam: return "\u{1F60C}"  // 😌
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .on: return "따뜻하고 부드러운 친구"
+        case .dam: return "차분하고 포근한 친구"
+        }
+    }
+
+    var voiceName: String {
+        switch self {
+        case .on: return "Leda"       // Youthful (여성)
+        case .dam: return "Enceladus"  // Breathy (저음 남성)
+        }
+    }
+
+    var gradientColors: [String] {
+        switch self {
+        case .on: return ["orange", "pink"]
+        case .dam: return ["indigo", "blue"]
+        }
+    }
+}
+
 // MARK: - Memory (Long-term)
 struct CompanionMemory: Identifiable, Codable {
     let id: UUID

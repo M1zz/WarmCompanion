@@ -76,7 +76,10 @@ struct APIConfig {
     // MARK: - Gemini Live API (Real-time Voice)
     static let geminiLiveModel = "models/gemini-2.5-flash-native-audio-preview-12-2025"
     static let geminiLiveWebSocketURL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
-    static let geminiLiveVoice = "Leda"
+    static var geminiLiveVoice: String {
+        let saved = UserDefaults.standard.string(forKey: "selectedCompanion") ?? "on"
+        return (CompanionType(rawValue: saved) ?? .on).voiceName
+    }
     
     // MARK: - Validation
     static var isGeminiConfigured: Bool {

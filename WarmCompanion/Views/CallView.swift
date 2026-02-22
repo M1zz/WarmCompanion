@@ -5,8 +5,12 @@ struct CallView: View {
     @EnvironmentObject var viewModel: ChatViewModel
     @Environment(\.dismiss) private var dismiss
 
+    // MARK: - Call Mode
+    var isIncoming: Bool = false  // true = 수신 전화
+
     // MARK: - Call State
     enum CallPhase {
+        case incoming     // 수신 전화 (받기/거절)
         case calling      // 전화 거는 중 (따르르릉...)
         case connected    // 통화 연결됨
         case ended        // 통화 종료
@@ -27,6 +31,8 @@ struct CallView: View {
     @State private var waveAmplitudes: [CGFloat] = [0.3, 0.5, 0.8, 0.6, 0.4]
 
     private var liveService: GeminiLiveService { viewModel.geminiLiveService }
+    private var isOn: Bool { viewModel.companion == .on }
+    private var accentColor: Color { isOn ? .orange : .indigo }
 
     var body: some View {
         ZStack {
@@ -72,13 +78,17 @@ struct CallView: View {
             }
         }
         .onAppear {
-            startCalling()
+            if isIncoming {
+                startIncoming()
+            } else {
+                startCalling()
+            }
         }
         .onDisappear {
             cleanup()
         }
         .onChange(of: liveService.sessionState) { _, newState in
-            if case .connected = newState, phase == .calling {
+            if case .connected = newState, (phase == .calling || phase == .incoming) {
                 // WebSocket 연결 완료 → 통화 시작
                 withAnimation(.easeInOut(duration: 0.3)) {
                     phase = .connected
@@ -100,11 +110,12 @@ struct CallView: View {
     private var statusText: some View {
         Group {
             switch phase {
+            case .incoming:
+                Text("전화가 왔어요")
+                    .foregroundStyle(.green)
             case .calling:
-                HStack(spacing: 6) {
-                    Text("전화 거는 중...")
-                        .foregroundStyle(.white.opacity(0.7))
-                }
+                Text("전화 거는 중...")
+                    .foregroundStyle(.white.opacity(0.7))
             case .connected:
                 Text(callTimeString)
                     .foregroundStyle(.white.opacity(0.7))
@@ -114,14 +125,14 @@ struct CallView: View {
             }
         }
         .font(.system(size: 16, weight: .medium))
-        .animation(.easeInOut(duration: 0.3), value: liveService.isModelSpeaking)
+        .animation(.easeInOut(duration: 0.3), value: phase)
     }
 
     // MARK: - Profile Area
     private var profileArea: some View {
         ZStack {
-            // Calling pulse
-            if phase == .calling {
+            // Calling/Incoming pulse
+            if phase == .calling || phase == .incoming {
                 pulseRing(trigger: ringPulse1)
                 pulseRing(trigger: ringPulse2)
                 pulseRing(trigger: ringPulse3)
@@ -132,7 +143,7 @@ struct CallView: View {
                 Circle()
                     .fill(
                         RadialGradient(
-                            colors: [Color.orange.opacity(0.12), Color.clear],
+                            colors: [accentColor.opacity(0.12), Color.clear],
                             center: .center,
                             startRadius: 50,
                             endRadius: 120
@@ -148,15 +159,17 @@ struct CallView: View {
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: [Color.orange.opacity(0.7), Color.pink.opacity(0.5)],
+                            colors: isOn
+                                ? [Color.orange.opacity(0.7), Color.pink.opacity(0.5)]
+                                : [Color.indigo.opacity(0.7), Color.blue.opacity(0.5)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
                     .frame(width: 120, height: 120)
-                    .shadow(color: .orange.opacity(phase == .connected ? 0.3 : 0.1), radius: 20)
+                    .shadow(color: accentColor.opacity(phase == .connected ? 0.3 : 0.1), radius: 20)
 
-                Text("\u{1F917}")
+                Text(viewModel.companionEmoji)
                     .font(.system(size: 56))
             }
         }
@@ -164,7 +177,7 @@ struct CallView: View {
 
     private func pulseRing(trigger: Bool) -> some View {
         Circle()
-            .stroke(Color.orange.opacity(0.2), lineWidth: 1.5)
+            .stroke(accentColor.opacity(0.2), lineWidth: 1.5)
             .frame(width: 180, height: 180)
             .scaleEffect(trigger ? 1.6 : 1.0)
             .opacity(trigger ? 0 : 0.7)
@@ -186,6 +199,12 @@ struct CallView: View {
     private var bottomButtons: some View {
         Group {
             switch phase {
+            case .incoming:
+                HStack(spacing: 60) {
+                    callActionButton(icon: "phone.down.fill", color: .red, label: "거절", action: endCall)
+                    callActionButton(icon: "phone.fill", color: .green, label: "받기", iconRotation: -135, action: acceptIncomingCall)
+                }
+
             case .calling:
                 callActionButton(icon: "phone.down.fill", color: .red, label: "취소", action: endCall)
 
@@ -316,6 +335,51 @@ struct CallView: View {
     /// 2. 상대방이 받음 → Gemini Live 연결
     private func answerCall() {
         print("[Call] 상대방 받음 -> Live API 연결 시작")
+        ringingTimer?.invalidate()
+
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+
+        viewModel.startLiveCall()
+    }
+
+    /// 수신 전화 화면 시작
+    private func startIncoming() {
+        print("[Call] 수신 전화 표시")
+        phase = .incoming
+
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
+
+        // Pulse animation
+        withAnimation(.easeOut(duration: 2.0).repeatForever(autoreverses: false)) {
+            ringPulse1 = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            withAnimation(.easeOut(duration: 2.0).repeatForever(autoreverses: false)) {
+                ringPulse2 = true
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            withAnimation(.easeOut(duration: 2.0).repeatForever(autoreverses: false)) {
+                ringPulse3 = true
+            }
+        }
+
+        // Ring sound
+        AudioServicesPlaySystemSound(1007)
+        ringingTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
+            guard phase == .incoming else {
+                ringingTimer?.invalidate()
+                return
+            }
+            AudioServicesPlaySystemSound(1007)
+        }
+    }
+
+    /// 수신 전화 받기
+    private func acceptIncomingCall() {
+        print("[Call] 수신 전화 받음 -> Live API 연결")
         ringingTimer?.invalidate()
 
         let generator = UIImpactFeedbackGenerator(style: .medium)

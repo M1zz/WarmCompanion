@@ -13,6 +13,7 @@ class ChatViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var showError: Bool = false
     @Published var memories: [CompanionMemory] = []
+    @Published var showIncomingCall = false
     
     // MARK: - Services
     private let geminiService = GeminiService()
@@ -24,14 +25,29 @@ class ChatViewModel: ObservableObject {
     private var liveCancellable: AnyCancellable?
 
     // MARK: - Companion Info
-    let companionName = "온"
-    let companionEmoji = "🤗"
+    @Published var companion: CompanionType {
+        didSet {
+            UserDefaults.standard.set(companion.rawValue, forKey: "selectedCompanion")
+        }
+    }
+    var companionName: String { companion.displayName }
+    var companionEmoji: String { companion.emoji }
 
     // MARK: - Init
     init() {
-        // GeminiLiveService 변경 → ChatViewModel로 전파 (SwiftUI가 중첩 ObservableObject를 자동 관찰하지 않음)
+        // 저장된 캐릭터 불러오기
+        let saved = UserDefaults.standard.string(forKey: "selectedCompanion") ?? "on"
+        self.companion = CompanionType(rawValue: saved) ?? .on
+
         liveCancellable = geminiLiveService.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
+        }
+
+        // 수신 전화 알림 관찰
+        NotificationCenter.default.addObserver(forName: .showIncomingCall, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                self?.showIncomingCall = true
+            }
         }
 
         loadData()

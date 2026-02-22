@@ -155,7 +155,7 @@ class GeminiLiveService: ObservableObject {
     // MARK: - Setup Message
     private func sendSetupMessage() {
         let fullPrompt = systemPrompt + memoryContext +
-            "\n\n## 통화 모드 추가 지침\n- 지금은 전화 통화 중이야. 짧고 자연스럽게 말해.\n- 2~3문장 이내로 답해.\n- 상대방이 말하면 바로 반응해줘."
+            "\n\n## 통화 모드 추가 지침\n- 지금은 전화 통화 중이야. 짧고 자연스럽게 말해.\n- 2~3문장 이내로 답해.\n- 상대방이 말하면 바로 반응해줘.\n- 통화가 시작되면 반드시 '여보세요?' 라고 먼저 인사해. 첫 마디는 항상 '여보세요?'야."
 
         let setup: [String: Any] = [
             "setup": [
@@ -195,6 +195,23 @@ class GeminiLiveService: ObservableObject {
                 print("[GeminiLive] 전송 에러: \(error.localizedDescription)")
             }
         }
+    }
+
+    // MARK: - Initial Greeting (AI가 먼저 "여보세요?" 발화)
+    private func sendInitialGreeting() {
+        let greeting: [String: Any] = [
+            "clientContent": [
+                "turns": [
+                    [
+                        "role": "user",
+                        "parts": [["text": "(전화가 연결되었어. 먼저 여보세요? 하고 인사해줘)"]]
+                    ]
+                ],
+                "turnComplete": true
+            ]
+        ]
+        print("[GeminiLive] 🗣️ 초기 인사 요청 전송")
+        sendJSON(greeting)
     }
 
     // MARK: - Send Audio
@@ -252,6 +269,7 @@ class GeminiLiveService: ObservableObject {
             print("[GeminiLive] ✅ Setup complete - 세션 활성화")
             sessionState = .connected
             startAudioEngine()
+            sendInitialGreeting()
             return
         }
 
@@ -374,7 +392,7 @@ class GeminiLiveService: ObservableObject {
         }
 
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputHWFormat) { [weak self] buffer, _ in
-            guard let self = self, !self.isMicMuted else { return }
+            guard let self = self, !self.isMicMuted, !self.isModelSpeaking else { return }
 
             guard let pcmBuffer = self.convertBuffer(buffer, from: inputHWFormat, to: targetFormat, converter: converter) else {
                 return

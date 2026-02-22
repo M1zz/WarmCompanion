@@ -5,41 +5,74 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showClearConfirm = false
     @State private var showDeleteAllConfirm = false
+    @State private var dailyCallEnabled = UserDefaults.standard.bool(forKey: "dailyCallEnabled")
+    @State private var dailyCallRandom = UserDefaults.standard.bool(forKey: "dailyCallRandom")
+    @State private var dailyCallTime = {
+        let hour = UserDefaults.standard.integer(forKey: "dailyCallHour")
+        let minute = UserDefaults.standard.integer(forKey: "dailyCallMinute")
+        if hour == 0 && minute == 0 && !UserDefaults.standard.bool(forKey: "dailyCallEnabled") {
+            // 기본값: 오후 9시
+            var components = DateComponents()
+            components.hour = 21
+            components.minute = 0
+            return Calendar.current.date(from: components) ?? Date()
+        }
+        var components = DateComponents()
+        components.hour = hour
+        components.minute = minute
+        return Calendar.current.date(from: components) ?? Date()
+    }()
     
     var body: some View {
         NavigationStack {
             List {
-                // MARK: - Companion Profile
-                Section {
-                    HStack(spacing: 16) {
-                        ZStack {
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [Color.orange.opacity(0.6), Color.pink.opacity(0.4)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                                .frame(width: 60, height: 60)
-                            
-                            Text("🤗")
-                                .font(.system(size: 30))
-                        }
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(viewModel.companionName)
-                                .font(.system(size: 20, weight: .semibold))
-                            Text("항상 네 곁에 있을게")
-                                .font(.system(size: 14))
-                                .foregroundStyle(.secondary)
+                // MARK: - Companion Selection
+                Section("내 친구 선택") {
+                    ForEach(CompanionType.allCases) { type in
+                        Button {
+                            viewModel.companion = type
+                        } label: {
+                            HStack(spacing: 14) {
+                                ZStack {
+                                    Circle()
+                                        .fill(
+                                            LinearGradient(
+                                                colors: type == .on
+                                                    ? [Color.orange.opacity(0.6), Color.pink.opacity(0.4)]
+                                                    : [Color.indigo.opacity(0.6), Color.blue.opacity(0.4)],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .frame(width: 50, height: 50)
+                                    Text(type.emoji)
+                                        .font(.system(size: 24))
+                                }
+
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(type.displayName)
+                                        .font(.system(size: 17, weight: .semibold))
+                                        .foregroundStyle(.primary)
+                                    Text(type.description)
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Spacer()
+
+                                if viewModel.companion == type {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.blue)
+                                        .font(.system(size: 22))
+                                }
+                            }
+                            .padding(.vertical, 4)
                         }
                     }
-                    .padding(.vertical, 8)
                 }
-                
+
                 // MARK: - Memories
-                Section("온이 기억하고 있는 것") {
+                Section("\(viewModel.companionName)이 기억하고 있는 것") {
                     if viewModel.memories.isEmpty {
                         Text("아직 기억이 없어요. 대화하면서 자연스럽게 기억해갈게요.")
                             .font(.system(size: 14))
@@ -76,6 +109,76 @@ struct SettingsView: View {
                     }
                 }
                 
+                // MARK: - Daily Call Notification
+                Section {
+                    Toggle(isOn: $dailyCallEnabled) {
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("매일 전화 받기")
+                                Text("\(viewModel.companionName)이가 매일 전화해요")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "phone.arrow.down.left.fill")
+                        }
+                    }
+                    .onChange(of: dailyCallEnabled) { _, enabled in
+                        UserDefaults.standard.set(enabled, forKey: "dailyCallEnabled")
+                        if enabled {
+                            Task {
+                                let granted = await NotificationService.shared.requestPermission()
+                                if granted {
+                                    scheduleDailyNotification()
+                                } else {
+                                    dailyCallEnabled = false
+                                }
+                            }
+                        } else {
+                            NotificationService.shared.cancelDailyCall()
+                        }
+                    }
+
+                    if dailyCallEnabled {
+                        Picker("시간 설정", selection: $dailyCallRandom) {
+                            Text("아무때나").tag(true)
+                            Text("시간 지정").tag(false)
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: dailyCallRandom) { _, isRandom in
+                            UserDefaults.standard.set(isRandom, forKey: "dailyCallRandom")
+                            scheduleDailyNotification()
+                        }
+
+                        if !dailyCallRandom {
+                            DatePicker("시간", selection: $dailyCallTime, displayedComponents: .hourAndMinute)
+                                .onChange(of: dailyCallTime) { _, newTime in
+                                    let components = Calendar.current.dateComponents([.hour, .minute], from: newTime)
+                                    UserDefaults.standard.set(components.hour ?? 21, forKey: "dailyCallHour")
+                                    UserDefaults.standard.set(components.minute ?? 0, forKey: "dailyCallMinute")
+                                    NotificationService.shared.scheduleDailyCall(hour: components.hour ?? 21, minute: components.minute ?? 0)
+                                }
+                        } else {
+                            Text("매일 오전 10시 ~ 밤 11시 사이 랜덤으로 연락해요")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Button("테스트 알림 (5초 후)") {
+                            Task {
+                                let granted = await NotificationService.shared.requestPermission()
+                                if granted {
+                                    NotificationService.shared.scheduleTestCall(after: 5)
+                                }
+                            }
+                        }
+                        .font(.system(size: 14))
+                        .foregroundStyle(.blue)
+                    }
+                } header: {
+                    Text("수신 전화")
+                }
+
                 // MARK: - Phase Info
                 Section("기능 안내") {
                     Label {
@@ -187,6 +290,17 @@ struct SettingsView: View {
         }
     }
     
+    private func scheduleDailyNotification() {
+        if dailyCallRandom {
+            NotificationService.shared.scheduleRandomDailyCall()
+        } else {
+            let components = Calendar.current.dateComponents([.hour, .minute], from: dailyCallTime)
+            UserDefaults.standard.set(components.hour ?? 21, forKey: "dailyCallHour")
+            UserDefaults.standard.set(components.minute ?? 0, forKey: "dailyCallMinute")
+            NotificationService.shared.scheduleDailyCall(hour: components.hour ?? 21, minute: components.minute ?? 0)
+        }
+    }
+
     private func daysSinceFirst() -> String {
         guard let first = viewModel.messages.first else { return "0일" }
         let days = Calendar.current.dateComponents([.day], from: first.timestamp, to: Date()).day ?? 0
