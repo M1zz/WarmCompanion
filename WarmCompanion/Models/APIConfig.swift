@@ -50,14 +50,14 @@ struct APIConfig {
     // MARK: - Phase 1: Text Chat (무료)
     /// Google Gemini API Key
     /// 발급: https://aistudio.google.com/apikey
-    static let geminiAPIKey = "AIzaSyB0Dzq2zaduPoNUBRG7V0lDf-lOcxpNI8s"
+    static let geminiAPIKey = Secrets.geminiAPIKey
     
     // MARK: - Phase 2: Voice Chat
     /// ElevenLabs API Key (고품질 TTS, 선택사항)
     /// 없으면 Apple AVSpeechSynthesizer 사용 (무료, 품질 낮음)
     /// 발급: https://elevenlabs.io
-    static let elevenLabsAPIKey = "sk_60e55101e6ebdfe0c1ab3d2cd2739d4525080a9ce77fb6a5"
-    static let elevenLabsVoiceID = "zgDzx5jLLCqEp6Fl7Kl7"  // Hanna - Natural and Clear 한국어 여성 음성
+    static let elevenLabsAPIKey = Secrets.elevenLabsAPIKey
+    static let elevenLabsVoiceID = Secrets.elevenLabsVoiceID
     
     // MARK: - Phase 3: Video Message
     /// Hedra API Key (영상 메시지 생성)
@@ -72,6 +72,11 @@ struct APIConfig {
     // MARK: - Gemini Model Config
     static let geminiModel = "gemini-2.5-flash"
     static let geminiBaseURL = "https://generativelanguage.googleapis.com/v1beta/models"
+
+    // MARK: - Gemini Live API (Real-time Voice)
+    static let geminiLiveModel = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+    static let geminiLiveWebSocketURL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+    static let geminiLiveVoice = "Leda"
     
     // MARK: - Validation
     static var isGeminiConfigured: Bool {

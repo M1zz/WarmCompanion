@@ -13,5 +13,8 @@ xcuserdata/
 .AppleDouble
 .LSOverride
 
+# Secrets (API Keys)
+**/Secrets.swift
+
 # Claude
 .claude/

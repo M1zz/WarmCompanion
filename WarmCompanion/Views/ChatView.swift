@@ -73,7 +73,7 @@ struct ChatView: View {
             Spacer()
             
             // MARK: - Phase 2: Voice Call Button
-            Button(action: { requestIncomingCall() }) {
+            Button(action: { showCall = true }) {
                 Image(systemName: "phone.fill")
                     .font(.system(size: 18))
                     .foregroundStyle(.secondary)
@@ -245,16 +245,6 @@ struct ChatView: View {
         return previous.isFromUser
     }
 
-    /// 전화 버튼 탭 → 잠시 후 수신 화면 등장 (전화가 걸려오는 느낌)
-    private func requestIncomingCall() {
-        let generator = UIImpactFeedbackGenerator(style: .light)
-        generator.impactOccurred()
-
-        // 1~2초 후 전화가 오는 것처럼 표시
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            showCall = true
-        }
-    }
 }
 
 // MARK: - Typing Indicator

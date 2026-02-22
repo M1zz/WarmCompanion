@@ -18,15 +18,25 @@ class ChatViewModel: ObservableObject {
     private let geminiService = GeminiService()
     private let persistence = PersistenceService.shared
     let voiceService = VoiceService()
+    let geminiLiveService = GeminiLiveService()
     
+    // MARK: - Combine
+    private var liveCancellable: AnyCancellable?
+
     // MARK: - Companion Info
     let companionName = "온"
     let companionEmoji = "🤗"
-    
+
     // MARK: - Init
     init() {
+        // GeminiLiveService 변경 → ChatViewModel로 전파 (SwiftUI가 중첩 ObservableObject를 자동 관찰하지 않음)
+        liveCancellable = geminiLiveService.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+
         loadData()
-        
+        setupGeminiLive()
+
         // 첫 실행시 인사 메시지
         if messages.isEmpty {
             let greeting = Message(
@@ -185,6 +195,29 @@ class ChatViewModel: ObservableObject {
         saveMessages()
     }
     
+    // MARK: - Gemini Live (Real-time Voice Call)
+    private func setupGeminiLive() {
+        Task {
+            let prompt = await geminiService.getSystemPrompt()
+            let memory = await geminiService.getMemoryContext()
+            geminiLiveService.configure(systemPrompt: prompt, memoryContext: memory)
+        }
+
+        // 통화 내용은 채팅에 남기지 않음
+    }
+
+    func startLiveCall() {
+        Task {
+            let memory = await geminiService.getMemoryContext()
+            geminiLiveService.updateMemoryContext(memory)
+            geminiLiveService.connect()
+        }
+    }
+
+    func endLiveCall() {
+        geminiLiveService.disconnect()
+    }
+
     // MARK: - Phase 2: Voice
     func sendVoiceMessage() {
         guard !voiceService.recognizedText.isEmpty else { return }
@@ -201,26 +234,24 @@ class ChatViewModel: ObservableObject {
         voiceService.speak(lastAI.content)
     }
 
-    /// 전화 수락 시: 인사 + 마지막 응답 읽기
-    func speakForIncomingCall() {
-        let greetings = [
-            "여보세요~",
-            "여보세요, 나야~",
-            "응, 나 온이야~",
-            "여보세요~ 잘 지내고 있었어?",
-        ]
-        let greeting = greetings.randomElement() ?? "여보세요~"
+    /// 전화 통화용: 텍스트를 Gemini에 보내고 응답 텍스트를 반환 + 채팅 로그 저장
+    func sendForCall(_ text: String) async -> String? {
+        // 유저 메시지 로그
+        let userMessage = Message(content: text, isFromUser: true)
+        messages.append(userMessage)
+        saveMessages()
+        print("[ChatVM] sendForCall - user: \(text)")
 
-        if let lastAI = messages.last(where: { !$0.isFromUser }) {
-            let fullText = "\(greeting) ... \(lastAI.content)"
-            print("[ChatVM] speakForIncomingCall - 인사: \(greeting)")
-            print("[ChatVM] speakForIncomingCall - 전체 텍스트 길이: \(fullText.count)자")
-            print("[ChatVM] speakForIncomingCall - 전체 텍스트: \(fullText.prefix(300))...")
-            voiceService.speak(fullText)
-        } else {
-            let fallback = "\(greeting) 무슨 이야기 해줄래?"
-            print("[ChatVM] speakForIncomingCall - AI 메시지 없음, 폴백: \(fallback)")
-            voiceService.speak(fallback)
+        do {
+            let response = try await geminiService.sendMessage(text)
+            let aiMessage = Message(content: response, isFromUser: false)
+            messages.append(aiMessage)
+            saveMessages()
+            print("[ChatVM] sendForCall - ai: \(response.prefix(200))...")
+            return response
+        } catch {
+            print("[ChatVM] sendForCall - error: \(error)")
+            return nil
         }
     }
 

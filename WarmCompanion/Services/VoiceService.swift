@@ -80,6 +80,7 @@ class VoiceService: NSObject, ObservableObject {
     /// 무료 TTS - Apple 내장 (폴백용)
     private func speakWithApple(_ text: String) {
         print("[VoiceService] Apple TTS 시작 - 텍스트: \(text.prefix(100))...")
+        configureAudioSessionForPlayback()
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: "ko-KR")
         utterance.rate = 0.42  // 천천히, 나긋나긋하게
@@ -97,7 +98,19 @@ class VoiceService: NSObject, ObservableObject {
         synthesizer.stopSpeaking(at: .immediate)
         isSpeaking = false
     }
-    
+
+    /// 오디오 세션을 재생 모드로 전환 (STT 후 TTS 전에 필요)
+    private func configureAudioSessionForPlayback() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .default, options: [])
+            try audioSession.setActive(true)
+            print("[VoiceService] 오디오 세션 -> playback 모드")
+        } catch {
+            print("[VoiceService] 오디오 세션 설정 실패: \(error)")
+        }
+    }
+
     // MARK: - STT (Speech-to-Text) - Apple Speech Framework
     private var audioEngine = AVAudioEngine()
     private var speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "ko-KR"))
@@ -200,6 +213,7 @@ class VoiceService: NSObject, ObservableObject {
             }
         }
 
+        configureAudioSessionForPlayback()
         DispatchQueue.main.async {
             self.isSpeaking = true
         }
