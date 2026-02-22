@@ -95,6 +95,13 @@ enum CompanionType: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    var statusMessage: String {
+        switch self {
+        case .on: return "네 이야기를 듣고 싶어"
+        case .dam: return "편하게 기대도 돼"
+        }
+    }
+
     var voiceName: String {
         switch self {
         case .on: return "Leda"       // Youthful (여성)

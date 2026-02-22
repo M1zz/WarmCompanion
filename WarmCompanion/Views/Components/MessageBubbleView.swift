@@ -8,6 +8,7 @@ struct MessageBubbleView: View {
     let showProfile: Bool
     let isStreaming: Bool
     var onSpeakTapped: (() -> Void)? = nil
+    var onProfileTapped: (() -> Void)? = nil
     
     var body: some View {
         if message.isFromUser {
@@ -50,7 +51,9 @@ struct MessageBubbleView: View {
         HStack(alignment: .top, spacing: 8) {
             // Profile
             if showProfile {
-                CompanionProfileView(companion: companion, size: 36)
+                Button { onProfileTapped?() } label: {
+                    CompanionProfileView(companion: companion, size: 36)
+                }
             } else {
                 Color.clear
                     .frame(width: 36, height: 36)

@@ -5,6 +5,7 @@ struct ChatView: View {
     @FocusState private var isInputFocused: Bool
     @State private var showSettings = false
     @State private var showCall = false
+    @State private var showCompanionProfile = false
     @Namespace private var bottomAnchor
     
     var body: some View {
@@ -30,6 +31,13 @@ struct ChatView: View {
             CallView()
                 .environmentObject(viewModel)
         }
+        .fullScreenCover(isPresented: $showCompanionProfile) {
+            CompanionProfileDetailView(
+                companion: viewModel.companion,
+                onChat: nil,
+                onCall: { showCall = true }
+            )
+        }
         .alert("오류", isPresented: $viewModel.showError) {
             Button("확인", role: .cancel) {}
         } message: {
@@ -41,7 +49,9 @@ struct ChatView: View {
     private var chatHeader: some View {
         HStack(spacing: 12) {
             // Profile image
-            CompanionProfileView(companion: viewModel.companion, size: 40)
+            Button { showCompanionProfile = true } label: {
+                CompanionProfileView(companion: viewModel.companion, size: 40)
+            }
             
             VStack(alignment: .leading, spacing: 2) {
                 Text(viewModel.companionName)
@@ -99,17 +109,20 @@ struct ChatView: View {
                     
                     ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, message in
                         let showTimestamp = shouldShowTimestamp(at: index)
-                        let showProfile = shouldShowProfile(at: index)
-                        
+                        let profileVisible = shouldShowProfile(at: index)
+
                         MessageBubbleView(
                             message: message,
                             companionName: viewModel.companionName,
                             companion: viewModel.companion,
                             showTimestamp: showTimestamp,
-                            showProfile: showProfile,
+                            showProfile: profileVisible,
                             isStreaming: viewModel.isStreaming && index == viewModel.messages.count - 1 && !message.isFromUser,
                             onSpeakTapped: message.isFromUser ? nil : {
                                 viewModel.voiceService.speak(message.content)
+                            },
+                            onProfileTapped: message.isFromUser ? nil : {
+                                showCompanionProfile = true
                             }
                         )
                         .id(message.id)
