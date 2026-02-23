@@ -19,11 +19,8 @@ import Foundation
 // Phase 2: 음성 채팅 (무료 ~ 저비용)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //
-// 🔲 ElevenLabs API Key (선택, 고품질 TTS)
-//    발급: https://elevenlabs.io → Profile → API Keys
-//    무료: 월 10,000자 / 유료: $5/월~
-//
-// 🔲 STT는 Apple Speech Framework 사용 (무료, 키 불필요)
+// ✅ 음성통화: Gemini Live API (무료, STT/TTS 내장)
+//    텍스트 채팅 음성: Apple AVSpeechSynthesizer (무료, 키 불필요)
 //
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Phase 3: 영상 메시지 (저비용)
@@ -51,13 +48,6 @@ struct APIConfig {
     /// Google Gemini API Key
     /// 발급: https://aistudio.google.com/apikey
     static let geminiAPIKey = Secrets.geminiAPIKey
-    
-    // MARK: - Phase 2: Voice Chat
-    /// ElevenLabs API Key (고품질 TTS, 선택사항)
-    /// 없으면 Apple AVSpeechSynthesizer 사용 (무료, 품질 낮음)
-    /// 발급: https://elevenlabs.io
-    static let elevenLabsAPIKey = Secrets.elevenLabsAPIKey
-    static let elevenLabsVoiceID = Secrets.elevenLabsVoiceID
     
     // MARK: - Phase 3: Video Message
     /// Hedra API Key (영상 메시지 생성)

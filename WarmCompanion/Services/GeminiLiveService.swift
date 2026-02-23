@@ -38,6 +38,25 @@ class GeminiLiveService: ObservableObject {
     @Published var outputTranscript = ""
     @Published var isMicMuted = false
 
+    // MARK: - Tunable Parameters (실시간 조절 가능)
+    @Published var energyThreshold: Float = 0.03          // 에코 게이트 임계값
+    @Published var turnCompleteDelayMs: Int = 50           // 턴 완료 후 마이크 열기까지 대기(ms)
+    @Published var silenceDurationMs: Int = 300            // 서버 VAD 침묵 판단 기준(ms)
+    @Published var startSensitivity: String = "START_SENSITIVITY_HIGH"  // 발화 시작 감도
+    @Published var endSensitivity: String = "END_SENSITIVITY_LOW"       // 발화 종료 감도
+
+    // MARK: - Debug Metrics (실시간 모니터링)
+    @Published var debugCurrentRMS: Float = 0              // 현재 마이크 에너지
+    @Published var debugLastResponseLatencyMs: Int = 0     // 마지막 응답 지연(ms)
+    @Published var debugTurnCount: Int = 0                 // 총 턴 수
+    @Published var debugInterruptCount: Int = 0            // 인터럽트 횟수
+    @Published var debugDroppedAudioCount: Int = 0         // 무시된 오디오 청크 수
+    @Published var debugIsEchoGated: Bool = false          // 에코 게이트 활성 여부
+    private var responseLatenies: [Int] = []               // 응답 지연 누적 (평균 계산용)
+    var debugAvgResponseLatencyMs: Int {                    // 평균 응답 지연
+        responseLatenies.isEmpty ? 0 : responseLatenies.reduce(0, +) / responseLatenies.count
+    }
+
     // MARK: - Callback
     var onConversationTurn: ((String, String) -> Void)?
 
@@ -58,6 +77,10 @@ class GeminiLiveService: ObservableObject {
 
     private var currentInputText = ""
     private var currentOutputText = ""
+    private var turnCompleteTask: Task<Void, Never>?
+    private var modelTurnId: UInt64 = 0        // 현재 모델 턴 식별자 (겹침 방지)
+    private var isInterrupted = false           // 인터럽트 후 잔여 오디오 무시용
+    private var userSpeechEndTime: CFAbsoluteTime = 0  // 사용자 발화 종료 시점 (응답 지연 측정)
 
     private let inputSampleRate: Double = 16000
     private let outputSampleRate: Double = 24000
@@ -144,6 +167,18 @@ class GeminiLiveService: ObservableObject {
         currentOutputText = ""
         pendingAudioBuffers = []
         reconnectAttempts = 0
+        modelTurnId = 0
+        isInterrupted = false
+        userSpeechEndTime = 0
+        turnCompleteTask?.cancel()
+        turnCompleteTask = nil
+        debugCurrentRMS = 0
+        debugLastResponseLatencyMs = 0
+        debugTurnCount = 0
+        debugInterruptCount = 0
+        debugDroppedAudioCount = 0
+        debugIsEchoGated = false
+        responseLatenies = []
     }
 
     // MARK: - Mic Mute
@@ -155,7 +190,7 @@ class GeminiLiveService: ObservableObject {
     // MARK: - Setup Message
     private func sendSetupMessage() {
         let fullPrompt = systemPrompt + memoryContext +
-            "\n\n## 통화 모드 추가 지침\n- 지금은 전화 통화 중이야. 짧고 자연스럽게 말해.\n- 2~3문장 이내로 답해.\n- 상대방이 말하면 바로 반응해줘.\n- 통화가 시작되면 반드시 '여보세요?' 라고 먼저 인사해. 첫 마디는 항상 '여보세요?'야."
+            "\n\n## 통화 모드 추가 지침\n- 지금은 전화 통화 중이야. 짧고 자연스럽게 말해.\n- 1~2문장 이내로 짧게 답해. 길게 말하지 마.\n- 상대방이 말하면 즉시 반응해. 생각하는 시간 없이 바로 대답해.\n- 침묵이 생기면 자연스럽게 먼저 말을 걸어줘. '뭐 해?', '또 무슨 얘기 할까?' 같이.\n- 대답할 때 '음...', '그러니까...' 같은 머뭇거림 없이 바로 핵심을 말해.\n- 통화가 시작되면 반드시 '여보세요?' 라고 먼저 인사해. 첫 마디는 항상 '여보세요?'야."
 
         let setup: [String: Any] = [
             "setup": [
@@ -173,6 +208,15 @@ class GeminiLiveService: ObservableObject {
                 ],
                 "systemInstruction": [
                     "parts": [["text": fullPrompt]]
+                ],
+                "realtimeInputConfig": [
+                    "automaticActivityDetection": [
+                        "disabled": false,
+                        "startOfSpeechSensitivity": startSensitivity,
+                        "endOfSpeechSensitivity": endSensitivity,
+                        "prefixPaddingMs": 20,
+                        "silenceDurationMs": silenceDurationMs
+                    ]
                 ],
                 "inputAudioTranscription": [String: Any](),
                 "outputAudioTranscription": [String: Any]()
@@ -290,27 +334,51 @@ class GeminiLiveService: ObservableObject {
     }
 
     private func handleServerContent(_ content: [String: Any]) {
-        // interrupted
+        // interrupted - 사용자가 끼어들었을 때 즉시 재생 중단 + 마이크 열기
         if content["interrupted"] as? Bool == true {
-            print("[GeminiLive] 🔇 Interrupted")
+            print("[GeminiLive] 🔇 Interrupted - 재생 즉시 중단")
+            debugInterruptCount += 1
+            turnCompleteTask?.cancel()
+            isInterrupted = true          // 이후 도착하는 이전 턴 오디오 무시
             stopPlayback()
             isModelSpeaking = false
+            isReceivingAudio = false
             return
         }
 
         // modelTurn
         if let modelTurn = content["modelTurn"] as? [String: Any],
            let parts = modelTurn["parts"] as? [[String: Any]] {
+
+            // 인터럽트 후 잔여 오디오 무시 (turnComplete 전까지)
+            if isInterrupted {
+                debugDroppedAudioCount += 1
+                print("[GeminiLive] ⏭️ 인터럽트 후 잔여 오디오 무시 (drop #\(debugDroppedAudioCount))")
+                return
+            }
+
             for part in parts {
                 if let inlineData = part["inlineData"] as? [String: Any],
                    let audioBase64 = inlineData["data"] as? String {
                     if !isModelSpeaking {
+                        // 새 턴 시작: 이전 재생을 확실히 정리하고 새 턴 ID 발급
+                        stopPlayback()
+                        modelTurnId += 1
+                        debugTurnCount += 1
                         isModelSpeaking = true
                         isReceivingAudio = true
-                        pendingAudioBuffers = []
+                        // 응답 지연 측정
+                        if userSpeechEndTime > 0 {
+                            let latency = Int((CFAbsoluteTimeGetCurrent() - userSpeechEndTime) * 1000)
+                            debugLastResponseLatencyMs = latency
+                            responseLatenies.append(latency)
+                            print("[GeminiLive] 🔊 새 모델 턴 시작 (id: \(modelTurnId), 응답지연: \(latency)ms, 평균: \(debugAvgResponseLatencyMs)ms)")
+                        } else {
+                            print("[GeminiLive] 🔊 새 모델 턴 시작 (id: \(modelTurnId))")
+                        }
                     }
                     if let audioData = Data(base64Encoded: audioBase64) {
-                        playAudioData(audioData)
+                        playAudioData(audioData, forTurnId: modelTurnId)
                     }
                 }
                 if let textPart = part["text"] as? String {
@@ -324,10 +392,15 @@ class GeminiLiveService: ObservableObject {
         if content["turnComplete"] as? Bool == true {
             print("[GeminiLive] ✅ Turn complete")
             isReceivingAudio = false
+            isInterrupted = false  // 턴 경계에서 인터럽트 플래그 리셋
 
-            Task {
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                if !self.isReceivingAudio {
+            // 이전 대기 타스크가 있으면 취소
+            turnCompleteTask?.cancel()
+            turnCompleteTask = Task {
+                // 튜닝 가능한 대기 시간 후 마이크 활성화
+                let delayNs = UInt64(self.turnCompleteDelayMs) * 1_000_000
+                try? await Task.sleep(nanoseconds: delayNs)
+                if !Task.isCancelled, !self.isReceivingAudio {
                     self.isModelSpeaking = false
                 }
             }
@@ -346,6 +419,7 @@ class GeminiLiveService: ObservableObject {
            let text = inputTranscription["text"] as? String {
             currentInputText += text
             inputTranscript = currentInputText
+            userSpeechEndTime = CFAbsoluteTimeGetCurrent()  // 응답 지연 측정 기준점
             print("[GeminiLive] 🎤 Input: \(text)")
         }
 
@@ -392,7 +466,27 @@ class GeminiLiveService: ObservableObject {
         }
 
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputHWFormat) { [weak self] buffer, _ in
-            guard let self = self, !self.isMicMuted, !self.isModelSpeaking else { return }
+            guard let self = self, !self.isMicMuted else { return }
+
+            // 에너지 측정 (디버그 메트릭)
+            let energy = self.calculateRMS(buffer: buffer)
+            Task { @MainActor in
+                self.debugCurrentRMS = energy
+            }
+
+            // AI 발화 중에는 에너지 체크로 에코 필터링 (스피커 → 마이크 피드백 방지)
+            // .voiceChat 모드의 HW 에코 제거 + SW 에너지 게이트 이중 보호
+            if self.isModelSpeaking {
+                let threshold = self.energyThreshold
+                guard energy > threshold else {
+                    Task { @MainActor in self.debugIsEchoGated = true }
+                    return
+                }
+                Task { @MainActor in self.debugIsEchoGated = false }
+                print("[GeminiLive] 🎤 사용자 끼어들기 감지 (energy: \(String(format: "%.4f", energy)), threshold: \(threshold))")
+            } else {
+                Task { @MainActor in self.debugIsEchoGated = false }
+            }
 
             guard let pcmBuffer = self.convertBuffer(buffer, from: inputHWFormat, to: targetFormat, converter: converter) else {
                 return
@@ -422,6 +516,21 @@ class GeminiLiveService: ObservableObject {
         self.audioEngine = engine
         self.playerNode = player
         self.playerMixer = mixer
+    }
+
+    // MARK: - Audio Energy (에코 vs 실제 음성 구분)
+    /// 마이크 입력의 RMS 에너지 계산 (오디오 스레드에서 호출)
+    private nonisolated func calculateRMS(buffer: AVAudioPCMBuffer) -> Float {
+        guard let channelData = buffer.floatChannelData else { return 0 }
+        let count = Int(buffer.frameLength)
+        guard count > 0 else { return 0 }
+        var sumOfSquares: Float = 0
+        let ptr = channelData[0]
+        for i in 0..<count {
+            let sample = ptr[i]
+            sumOfSquares += sample * sample
+        }
+        return sqrt(sumOfSquares / Float(count))
     }
 
     private func convertBuffer(_ buffer: AVAudioPCMBuffer, from sourceFormat: AVAudioFormat, to targetFormat: AVAudioFormat, converter: AVAudioConverter?) -> AVAudioPCMBuffer? {
@@ -460,7 +569,13 @@ class GeminiLiveService: ObservableObject {
     }
 
     // MARK: - Audio Playback (Output)
-    private func playAudioData(_ data: Data) {
+    private func playAudioData(_ data: Data, forTurnId turnId: UInt64) {
+        // 이미 지나간 턴의 오디오는 재생하지 않음 (겹침 방지)
+        guard turnId == modelTurnId else {
+            print("[GeminiLive] ⏭️ 이전 턴(\(turnId)) 오디오 무시 (현재: \(modelTurnId))")
+            return
+        }
+
         guard let playerNode = playerNode,
               let engine = audioEngine,
               engine.isRunning else { return }
@@ -485,6 +600,7 @@ class GeminiLiveService: ObservableObject {
     }
 
     private func stopPlayback() {
+        // stop()은 스케줄된 버퍼도 모두 제거함
         playerNode?.stop()
         pendingAudioBuffers = []
     }

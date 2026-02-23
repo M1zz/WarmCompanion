@@ -78,9 +78,31 @@ class PersistenceService {
         return emotions
     }
     
+    // MARK: - Voice Tuning Logs
+    func saveTuningLogs(_ logs: [VoiceTuningLog]) {
+        guard let data = try? JSONEncoder().encode(logs) else { return }
+        let url = documentsDirectory.appendingPathComponent("tuning_logs.json")
+        try? data.write(to: url)
+    }
+
+    func loadTuningLogs() -> [VoiceTuningLog] {
+        let url = documentsDirectory.appendingPathComponent("tuning_logs.json")
+        guard let data = try? Data(contentsOf: url),
+              let logs = try? JSONDecoder().decode([VoiceTuningLog].self, from: data) else {
+            return []
+        }
+        return logs
+    }
+
+    func appendTuningLog(_ log: VoiceTuningLog) {
+        var logs = loadTuningLogs()
+        logs.append(log)
+        saveTuningLogs(logs)
+    }
+
     // MARK: - Clear All
     func clearAll() {
-        let files = ["messages.json", "memories.json", "emotions.json"]
+        let files = ["messages.json", "memories.json", "emotions.json", "tuning_logs.json"]
         for file in files {
             let url = documentsDirectory.appendingPathComponent(file)
             try? fileManager.removeItem(at: url)

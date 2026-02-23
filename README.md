@@ -65,16 +65,6 @@
   <string>음성 메시지를 녹음하기 위해 마이크를 사용합니다.</string>
   ```
 
-#### ElevenLabs API Key (선택, 고품질 TTS)
-1. https://elevenlabs.io 접속
-2. 계정 생성 (무료)
-3. Profile → API Keys → "Create API Key"
-4. Voice Library에서 한국어 여성 음성 선택 → Voice ID 복사
-5. `APIConfig.swift`에서 주석 해제 후 입력
-
-**무료 한도:** 월 10,000자 (~3분 분량)
-**유료:** $5/월부터
-
 ---
 
 ### 🔲 Phase 3: 영상 메시지 (나중에 필요)
@@ -141,7 +131,7 @@ WarmCompanion/
 ### Phase 2: 음성 채팅
 - [ ] VoiceService.swift 주석 해제
 - [ ] Apple Speech STT 연동
-- [ ] ElevenLabs TTS 연동 (또는 무료 Apple TTS)
+- [x] Apple TTS 연동 (텍스트 채팅 메시지 읽기)
 - [ ] 음성 메시지 녹음/재생 UI
 - [ ] 음성 통화 모드
 

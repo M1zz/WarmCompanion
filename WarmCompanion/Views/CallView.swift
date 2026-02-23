@@ -23,6 +23,12 @@ struct CallView: View {
     @State private var waveTimer: Timer?
     @State private var isCallActive = true
     @State private var isMuted = false
+    @State private var showDebugPanel = false
+    @State private var showLogSheet = false
+    @State private var experimentRating: Int = 3
+    @State private var experimentNote: String = ""
+    @State private var savedLogs: [VoiceTuningLog] = []
+    @State private var showSavedToast = false
 
     // Animations
     @State private var ringPulse1 = false
@@ -47,6 +53,7 @@ struct CallView: View {
             )
             .ignoresSafeArea()
 
+            // 통화 UI (기존)
             VStack(spacing: 0) {
                 Spacer().frame(height: 80)
 
@@ -74,7 +81,53 @@ struct CallView: View {
 
                 // Buttons
                 bottomButtons
-                    .padding(.bottom, 60)
+                    .padding(.bottom, showDebugPanel ? 10 : 60)
+            }
+
+            // 디버그 패널 (하단 오버레이)
+            if phase == .connected {
+                VStack(spacing: 0) {
+                    Spacer()
+
+                    // 토글 핸들
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            showDebugPanel.toggle()
+                        }
+                    } label: {
+                        VStack(spacing: 4) {
+                            Capsule()
+                                .fill(Color.white.opacity(0.3))
+                                .frame(width: 36, height: 4)
+                            HStack(spacing: 4) {
+                                Image(systemName: "wrench.and.screwdriver")
+                                    .font(.system(size: 10))
+                                if !showDebugPanel {
+                                    Text("실험 패널")
+                                        .font(.system(size: 10, weight: .medium))
+                                }
+                                Image(systemName: showDebugPanel ? "chevron.down" : "chevron.up")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            .foregroundStyle(.white.opacity(0.5))
+                        }
+                        .padding(.top, 8)
+                        .padding(.bottom, 4)
+                    }
+                    .background(
+                        UnevenRoundedRectangle(topLeadingRadius: 16, topTrailingRadius: 16)
+                            .fill(Color.black.opacity(0.7))
+                    )
+
+                    if showDebugPanel {
+                        ScrollView {
+                            debugTuningPanel
+                        }
+                        .frame(maxHeight: UIScreen.main.bounds.height * 0.45)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .ignoresSafeArea(.container, edges: .bottom)
             }
         }
         .onAppear {
@@ -419,6 +472,447 @@ struct CallView: View {
         ringingTimer?.invalidate()
         waveTimer?.invalidate()
         viewModel.endLiveCall()
+    }
+
+    // MARK: - Debug Tuning Panel
+    private var debugTuningPanel: some View {
+        VStack(spacing: 0) {
+            // 실시간 메트릭
+            metricsBar
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+
+            Divider().background(Color.white.opacity(0.1)).padding(.vertical, 6)
+
+            // 슬라이더들
+            VStack(spacing: 10) {
+                tuningSlider(
+                    label: "에코 게이트",
+                    value: Binding(
+                        get: { Double(liveService.energyThreshold) },
+                        set: { liveService.energyThreshold = Float($0) }
+                    ),
+                    range: 0.005...0.15,
+                    format: "%.3f",
+                    hint: "낮을수록 끼어들기 쉬움"
+                )
+
+                tuningSlider(
+                    label: "턴 전환 딜레이",
+                    value: Binding(
+                        get: { Double(liveService.turnCompleteDelayMs) },
+                        set: { liveService.turnCompleteDelayMs = Int($0) }
+                    ),
+                    range: 0...500,
+                    format: "%.0fms",
+                    hint: "낮을수록 빠른 응답"
+                )
+
+                tuningSlider(
+                    label: "침묵 판단",
+                    value: Binding(
+                        get: { Double(liveService.silenceDurationMs) },
+                        set: { liveService.silenceDurationMs = Int($0) }
+                    ),
+                    range: 100...1000,
+                    format: "%.0fms",
+                    hint: "재연결 시 적용"
+                )
+
+                // 감도 토글
+                HStack(spacing: 12) {
+                    sensitivityPicker(
+                        label: "시작감도",
+                        value: Binding(
+                            get: { liveService.startSensitivity },
+                            set: { liveService.startSensitivity = $0 }
+                        ),
+                        options: ["START_SENSITIVITY_HIGH", "START_SENSITIVITY_LOW"],
+                        labels: ["높음", "낮음"]
+                    )
+                    sensitivityPicker(
+                        label: "종료감도",
+                        value: Binding(
+                            get: { liveService.endSensitivity },
+                            set: { liveService.endSensitivity = $0 }
+                        ),
+                        options: ["END_SENSITIVITY_HIGH", "END_SENSITIVITY_LOW"],
+                        labels: ["높음", "낮음"]
+                    )
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
+
+            Divider().background(Color.white.opacity(0.1)).padding(.vertical, 4)
+
+            // 실험 기록 섹션
+            experimentLogSection
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
+
+            // 하단 버튼들
+            HStack(spacing: 12) {
+                // 재연결 버튼
+                Button {
+                    liveService.disconnect()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        viewModel.startLiveCall()
+                    }
+                } label: {
+                    Text("설정 적용 (재연결)")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Color.orange.opacity(0.15))
+                        .clipShape(Capsule())
+                }
+
+                // 기록 보기
+                Button {
+                    savedLogs = PersistenceService.shared.loadTuningLogs()
+                    showLogSheet = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "list.clipboard")
+                            .font(.system(size: 10))
+                        Text("기록 보기")
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.blue)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(Color.blue.opacity(0.15))
+                    .clipShape(Capsule())
+                }
+            }
+            .padding(.bottom, 16)
+        }
+        .padding(.horizontal, 16)
+        .background(Color.black.opacity(0.7))
+        .overlay {
+            if showSavedToast {
+                VStack {
+                    Text("기록 저장됨")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color.green.opacity(0.8))
+                        .clipShape(Capsule())
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    Spacer()
+                }
+            }
+        }
+        .sheet(isPresented: $showLogSheet) {
+            experimentLogListView
+        }
+    }
+
+    private var metricsBar: some View {
+        HStack(spacing: 0) {
+            metricBadge(
+                icon: "waveform",
+                value: String(format: "%.3f", liveService.debugCurrentRMS),
+                color: liveService.debugIsEchoGated ? .red : .green
+            )
+            Spacer()
+            metricBadge(
+                icon: "clock",
+                value: "\(liveService.debugLastResponseLatencyMs)ms",
+                color: liveService.debugLastResponseLatencyMs > 1000 ? .red : .green
+            )
+            Spacer()
+            metricBadge(
+                icon: "arrow.triangle.2.circlepath",
+                value: "\(liveService.debugTurnCount)",
+                color: .blue
+            )
+            Spacer()
+            metricBadge(
+                icon: "hand.raised",
+                value: "\(liveService.debugInterruptCount)",
+                color: .orange
+            )
+            Spacer()
+            metricBadge(
+                icon: "xmark.circle",
+                value: "\(liveService.debugDroppedAudioCount)",
+                color: .red
+            )
+        }
+    }
+
+    private func metricBadge(icon: String, value: String, color: Color) -> some View {
+        VStack(spacing: 2) {
+            Image(systemName: icon)
+                .font(.system(size: 10))
+                .foregroundStyle(color.opacity(0.7))
+            Text(value)
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.8))
+        }
+        .frame(minWidth: 50)
+    }
+
+    private func tuningSlider(
+        label: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        format: String,
+        hint: String
+    ) -> some View {
+        VStack(spacing: 2) {
+            HStack {
+                Text(label)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.6))
+                Spacer()
+                Text(String(format: format, value.wrappedValue))
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+            HStack(spacing: 8) {
+                Slider(value: value, in: range)
+                    .tint(accentColor)
+                Text(hint)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.3))
+                    .frame(width: 70, alignment: .trailing)
+            }
+        }
+    }
+
+    // MARK: - Experiment Log Section (별점 + 메모 + 저장)
+    private var experimentLogSection: some View {
+        VStack(spacing: 8) {
+            // 별점
+            HStack(spacing: 2) {
+                Text("평가")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.6))
+                Spacer()
+                ForEach(1...5, id: \.self) { star in
+                    Button {
+                        experimentRating = star
+                    } label: {
+                        Image(systemName: star <= experimentRating ? "star.fill" : "star")
+                            .font(.system(size: 16))
+                            .foregroundStyle(star <= experimentRating ? .yellow : .white.opacity(0.2))
+                    }
+                }
+            }
+
+            // 메모
+            HStack(spacing: 6) {
+                TextField("메모 (예: 침묵 줄었음, 에코 있음...)", text: $experimentNote)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                // 저장
+                Button {
+                    saveExperimentLog()
+                } label: {
+                    Image(systemName: "square.and.arrow.down.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.green)
+                        .padding(6)
+                        .background(Color.green.opacity(0.15))
+                        .clipShape(Circle())
+                }
+            }
+        }
+    }
+
+    private func saveExperimentLog() {
+        let log = VoiceTuningLog(
+            energyThreshold: liveService.energyThreshold,
+            turnCompleteDelayMs: liveService.turnCompleteDelayMs,
+            silenceDurationMs: liveService.silenceDurationMs,
+            startSensitivity: liveService.startSensitivity,
+            endSensitivity: liveService.endSensitivity,
+            totalTurns: liveService.debugTurnCount,
+            interruptCount: liveService.debugInterruptCount,
+            droppedAudioCount: liveService.debugDroppedAudioCount,
+            avgResponseLatencyMs: liveService.debugAvgResponseLatencyMs,
+            callDurationSec: callSeconds,
+            rating: experimentRating,
+            note: experimentNote
+        )
+        PersistenceService.shared.appendTuningLog(log)
+        experimentNote = ""
+
+        withAnimation(.easeInOut(duration: 0.3)) { showSavedToast = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation(.easeInOut(duration: 0.3)) { showSavedToast = false }
+        }
+    }
+
+    // MARK: - Experiment Log List (Sheet)
+    private var experimentLogListView: some View {
+        NavigationView {
+            List {
+                if savedLogs.isEmpty {
+                    Text("아직 기록이 없습니다")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(savedLogs.sorted(by: { $0.timestamp > $1.timestamp })) { log in
+                        VStack(alignment: .leading, spacing: 6) {
+                            // 상단: 날짜 + 별점
+                            HStack {
+                                Text(log.timestamp, style: .date)
+                                    .font(.system(size: 12, weight: .medium))
+                                Text(log.timestamp, style: .time)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                HStack(spacing: 1) {
+                                    ForEach(1...5, id: \.self) { star in
+                                        Image(systemName: star <= log.rating ? "star.fill" : "star")
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(star <= log.rating ? .yellow : .gray.opacity(0.3))
+                                    }
+                                }
+                            }
+
+                            // 메모
+                            if !log.note.isEmpty {
+                                Text(log.note)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(.primary)
+                            }
+
+                            // 파라미터
+                            HStack(spacing: 8) {
+                                paramTag("에코", String(format: "%.3f", log.energyThreshold))
+                                paramTag("턴딜레이", "\(log.turnCompleteDelayMs)ms")
+                                paramTag("침묵", "\(log.silenceDurationMs)ms")
+                            }
+
+                            // 메트릭
+                            HStack(spacing: 8) {
+                                metricTag("턴", "\(log.totalTurns)")
+                                metricTag("인터럽트", "\(log.interruptCount)")
+                                metricTag("응답", "\(log.avgResponseLatencyMs)ms")
+                                metricTag("통화", formatDuration(log.callDurationSec))
+                            }
+
+                            // 감도
+                            HStack(spacing: 8) {
+                                paramTag("시작", log.startSensitivity.contains("HIGH") ? "높음" : "낮음")
+                                paramTag("종료", log.endSensitivity.contains("HIGH") ? "높음" : "낮음")
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+            .navigationTitle("실험 기록")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("닫기") { showLogSheet = false }
+                }
+                ToolbarItem(placement: .topBarLeading) {
+                    if !savedLogs.isEmpty {
+                        // 최고 평점 설정 적용
+                        Button {
+                            applyBestLog()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "trophy.fill")
+                                    .font(.system(size: 11))
+                                Text("최고 설정 적용")
+                                    .font(.system(size: 12))
+                            }
+                            .foregroundStyle(.orange)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func paramTag(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 2) {
+            Text(label)
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(Color.blue.opacity(0.1))
+        .clipShape(Capsule())
+    }
+
+    private func metricTag(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 2) {
+            Text(label)
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(Color.green.opacity(0.1))
+        .clipShape(Capsule())
+    }
+
+    private func formatDuration(_ seconds: Int) -> String {
+        let m = seconds / 60
+        let s = seconds % 60
+        return String(format: "%d:%02d", m, s)
+    }
+
+    private func applyBestLog() {
+        guard let best = savedLogs.max(by: { $0.rating < $1.rating }) else { return }
+        liveService.energyThreshold = best.energyThreshold
+        liveService.turnCompleteDelayMs = best.turnCompleteDelayMs
+        liveService.silenceDurationMs = best.silenceDurationMs
+        liveService.startSensitivity = best.startSensitivity
+        liveService.endSensitivity = best.endSensitivity
+        showLogSheet = false
+    }
+
+    private func sensitivityPicker(
+        label: String,
+        value: Binding<String>,
+        options: [String],
+        labels: [String]
+    ) -> some View {
+        VStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.white.opacity(0.5))
+            HStack(spacing: 0) {
+                ForEach(Array(zip(options, labels)), id: \.0) { option, displayLabel in
+                    Button {
+                        value.wrappedValue = option
+                    } label: {
+                        Text(displayLabel)
+                            .font(.system(size: 11, weight: value.wrappedValue == option ? .bold : .regular))
+                            .foregroundStyle(value.wrappedValue == option ? .white : .white.opacity(0.4))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 4)
+                            .background(
+                                value.wrappedValue == option
+                                    ? accentColor.opacity(0.3)
+                                    : Color.white.opacity(0.05)
+                            )
+                    }
+                }
+            }
+            .clipShape(Capsule())
+        }
     }
 }
 

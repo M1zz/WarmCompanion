@@ -137,6 +137,62 @@ enum CompanionType: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Voice Tuning Experiment Log
+struct VoiceTuningLog: Identifiable, Codable {
+    let id: UUID
+    let timestamp: Date
+
+    // 파라미터 스냅샷
+    let energyThreshold: Float
+    let turnCompleteDelayMs: Int
+    let silenceDurationMs: Int
+    let startSensitivity: String
+    let endSensitivity: String
+
+    // 세션 메트릭
+    let totalTurns: Int
+    let interruptCount: Int
+    let droppedAudioCount: Int
+    let avgResponseLatencyMs: Int
+    let callDurationSec: Int
+
+    // 평가
+    let rating: Int            // 1~5 별점
+    let note: String           // 자유 메모
+
+    init(
+        id: UUID = UUID(),
+        timestamp: Date = Date(),
+        energyThreshold: Float,
+        turnCompleteDelayMs: Int,
+        silenceDurationMs: Int,
+        startSensitivity: String,
+        endSensitivity: String,
+        totalTurns: Int,
+        interruptCount: Int,
+        droppedAudioCount: Int,
+        avgResponseLatencyMs: Int,
+        callDurationSec: Int,
+        rating: Int,
+        note: String
+    ) {
+        self.id = id
+        self.timestamp = timestamp
+        self.energyThreshold = energyThreshold
+        self.turnCompleteDelayMs = turnCompleteDelayMs
+        self.silenceDurationMs = silenceDurationMs
+        self.startSensitivity = startSensitivity
+        self.endSensitivity = endSensitivity
+        self.totalTurns = totalTurns
+        self.interruptCount = interruptCount
+        self.droppedAudioCount = droppedAudioCount
+        self.avgResponseLatencyMs = avgResponseLatencyMs
+        self.callDurationSec = callDurationSec
+        self.rating = rating
+        self.note = note
+    }
+}
+
 // MARK: - Memory (Long-term)
 struct CompanionMemory: Identifiable, Codable {
     let id: UUID

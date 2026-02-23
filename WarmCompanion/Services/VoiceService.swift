@@ -3,61 +3,59 @@ import AVFoundation
 import Speech
 
 // ============================================================
-// MARK: - Phase 2: Voice Service
+// MARK: - Voice Service
 // ============================================================
-// 음성 채팅 기능
-// - STT: Apple Speech Framework (무료, 온디바이스)
-// - TTS: AVSpeechSynthesizer (무료) 또는 ElevenLabs (유료, 고품질)
-//
-// 활성화 방법:
-// 1. Info.plist에 아래 권한 추가:
-//    - NSSpeechRecognitionUsageDescription
-//    - NSMicrophoneUsageDescription
-// 2. 아래 주석을 해제하세요
+// - STT: Apple Speech Framework (무료, 온디바이스) — 텍스트 채팅 마이크 입력용
+// - TTS: Apple AVSpeechSynthesizer (무료) — 텍스트 채팅 메시지 읽기용
+// - 음성 통화: GeminiLiveService가 자체 STT/TTS 처리 (이 서비스 미사용)
 // ============================================================
 
 class VoiceService: NSObject, ObservableObject {
     @Published var isRecording = false
     @Published var recognizedText = ""
     @Published var isSpeaking = false
-    
-    // MARK: - TTS (Text-to-Speech) - 무료 Apple 내장
+
+    // MARK: - TTS (Text-to-Speech) - Apple 내장
     private let synthesizer = AVSpeechSynthesizer()
-    
+    private var koreanVoice: AVSpeechSynthesisVoice?
+
     override init() {
         super.init()
         synthesizer.delegate = self
-    }
-    
-    /// TTS - ElevenLabs 우선, 실패시 Apple TTS 폴백
-    func speak(_ text: String) {
-        let cleaned = Self.stripForTTS(text)
-        print("[VoiceService] speak() - 원본 길이: \(text.count)자, 정제 후: \(cleaned.count)자")
-        print("[VoiceService] 정제 텍스트: \(cleaned.prefix(200))...")
-        guard !cleaned.isEmpty else {
-            print("[VoiceService] 정제 후 텍스트 비어있음, 스킵")
-            return
-        }
-        Task {
-            do {
-                try await speakWithElevenLabs(cleaned)
-            } catch {
-                print("[VoiceService] ElevenLabs 실패, Apple TTS 폴백 - error: \(error)")
-                await MainActor.run {
-                    speakWithApple(cleaned)
-                }
-            }
-        }
+        koreanVoice = Self.bestKoreanVoice()
     }
 
-    /// 이모지, 특수문자, 미모지 등 TTS에 부적합한 문자 제거
+    /// 사용 가능한 한국어 음성 중 가장 좋은 것을 선택
+    private static func bestKoreanVoice() -> AVSpeechSynthesisVoice? {
+        let koVoices = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix("ko") }
+
+        // 1순위: Premium 음성 (설정 → 손쉬운 사용 → 음성 콘텐츠에서 다운로드)
+        if let premium = koVoices.first(where: { $0.quality == .premium }) {
+            print("[VoiceService] 프리미엄 한국어 음성 사용: \(premium.name)")
+            return premium
+        }
+        // 2순위: Enhanced 음성
+        if let enhanced = koVoices.first(where: { $0.quality == .enhanced }) {
+            print("[VoiceService] 향상된 한국어 음성 사용: \(enhanced.name)")
+            return enhanced
+        }
+        // 3순위: 기본 음성
+        let fallback = AVSpeechSynthesisVoice(language: "ko-KR")
+        print("[VoiceService] 기본 한국어 음성 사용 (설정 → 손쉬운 사용 → 음성 콘텐츠에서 향상된 음성 다운로드 권장)")
+        return fallback
+    }
+
+    /// TTS - Apple 내장 음성으로 읽기
+    func speak(_ text: String) {
+        let cleaned = Self.stripForTTS(text)
+        guard !cleaned.isEmpty else { return }
+        speakWithApple(cleaned)
+    }
+
+    /// 이모지, 특수문자 등 TTS에 부적합한 문자 제거
     static func stripForTTS(_ text: String) -> String {
         var result = ""
         for scalar in text.unicodeScalars {
-            // 기본 문자: 한글, 영문, 숫자, 공백, 기본 문장부호
-            if scalar.properties.isEmoji && scalar.value > 0x23F && !scalar.properties.isEmojiPresentation == false {
-                // 이모지 스킵 — 아래에서 더 정확하게 처리
-            }
             switch scalar.value {
             case 0x0000...0x007F:  // Basic ASCII
                 result.append(Character(scalar))
@@ -73,46 +71,48 @@ class VoiceService: NSObject, ObservableObject {
                 break  // 이모지, 특수 기호 등 제거
             }
         }
-        // 연속 공백 정리
         return result.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces)
     }
 
-    /// 무료 TTS - Apple 내장 (폴백용)
     private func speakWithApple(_ text: String) {
-        print("[VoiceService] Apple TTS 시작 - 텍스트: \(text.prefix(100))...")
         configureAudioSessionForPlayback()
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "ko-KR")
-        utterance.rate = 0.42  // 천천히, 나긋나긋하게
-        utterance.pitchMultiplier = 1.05  // 살짝 높은 톤
-        utterance.volume = 0.85
-        utterance.preUtteranceDelay = 0.3  // 자연스러운 시작 딜레이
+
+        // 긴 문장은 자연스러운 단위로 분할해서 읽기
+        let sentences = text.components(separatedBy: CharacterSet(charactersIn: ".!?。\n"))
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
 
         isSpeaking = true
-        synthesizer.speak(utterance)
+
+        for (i, sentence) in sentences.enumerated() {
+            let utterance = AVSpeechUtterance(string: sentence)
+            utterance.voice = koreanVoice
+            utterance.rate = 0.48           // 약간 느리게 (0.5가 정상 속도)
+            utterance.pitchMultiplier = 1.0 // 자연스러운 톤 (변조하면 어색해짐)
+            utterance.volume = 0.9
+            utterance.preUtteranceDelay = i == 0 ? 0.15 : 0.08  // 문장 사이 자연스러운 간격
+            utterance.postUtteranceDelay = 0.12
+            synthesizer.speak(utterance)
+        }
     }
 
     func stopSpeaking() {
-        audioPlayer?.stop()
-        audioPlayer = nil
         synthesizer.stopSpeaking(at: .immediate)
         isSpeaking = false
     }
 
-    /// 오디오 세션을 재생 모드로 전환 (STT 후 TTS 전에 필요)
     private func configureAudioSessionForPlayback() {
         do {
             let audioSession = AVAudioSession.sharedInstance()
             try audioSession.setCategory(.playback, mode: .default, options: [])
             try audioSession.setActive(true)
-            print("[VoiceService] 오디오 세션 -> playback 모드")
         } catch {
             print("[VoiceService] 오디오 세션 설정 실패: \(error)")
         }
     }
 
     // MARK: - STT (Speech-to-Text) - Apple Speech Framework
-    private var audioEngine = AVAudioEngine()
+    private var audioEngine: AVAudioEngine?
     private var speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "ko-KR"))
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
@@ -126,43 +126,58 @@ class VoiceService: NSObject, ObservableObject {
     }
 
     func startRecording() throws {
-        recognitionTask?.cancel()
-        recognitionTask = nil
+        // 이미 녹음 중이면 무시
+        if audioEngine?.isRunning == true {
+            print("[VoiceService] 이미 녹음 중 - 스킵")
+            return
+        }
 
+        // 이전 세션 정리
+        cleanupRecording()
+
+        // 오디오 세션을 먼저 설정 (inputNode 접근 전에 반드시 필요)
         let audioSession = AVAudioSession.sharedInstance()
         try audioSession.setCategory(.record, mode: .measurement, options: .duckOthers)
         try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
 
-        recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
-        guard let recognitionRequest = recognitionRequest else { return }
-        recognitionRequest.shouldReportPartialResults = true
+        // 새 엔진 생성 (재사용하면 이전 탭이 남아서 크래시)
+        let engine = AVAudioEngine()
+        self.audioEngine = engine
 
-        let inputNode = audioEngine.inputNode
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        self.recognitionRequest = request
 
-        recognitionTask = speechRecognizer?.recognitionTask(with: recognitionRequest) { [weak self] result, error in
+        let inputNode = engine.inputNode
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+
+        // 포맷 유효성 검증 (channels=0 또는 sampleRate=0이면 크래시)
+        guard recordingFormat.channelCount > 0, recordingFormat.sampleRate > 0 else {
+            print("[VoiceService] 유효하지 않은 오디오 포맷: channels=\(recordingFormat.channelCount), rate=\(recordingFormat.sampleRate)")
+            cleanupRecording()
+            throw NSError(domain: "VoiceService", code: -1, userInfo: [NSLocalizedDescriptionKey: "마이크를 사용할 수 없습니다"])
+        }
+
+        recognitionTask = speechRecognizer?.recognitionTask(with: request) { [weak self] result, error in
+            guard let self = self else { return }
             if let result = result {
                 DispatchQueue.main.async {
-                    self?.recognizedText = result.bestTranscription.formattedString
+                    self.recognizedText = result.bestTranscription.formattedString
                 }
             }
             if error != nil || (result?.isFinal ?? false) {
-                self?.audioEngine.stop()
-                inputNode.removeTap(onBus: 0)
-                self?.recognitionRequest = nil
-                self?.recognitionTask = nil
                 DispatchQueue.main.async {
-                    self?.isRecording = false
+                    self.stopRecording()
                 }
             }
         }
 
-        let recordingFormat = inputNode.outputFormat(forBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
-            recognitionRequest.append(buffer)
+            request.append(buffer)
         }
 
-        audioEngine.prepare()
-        try audioEngine.start()
+        engine.prepare()
+        try engine.start()
 
         DispatchQueue.main.async {
             self.isRecording = true
@@ -171,75 +186,31 @@ class VoiceService: NSObject, ObservableObject {
     }
 
     func stopRecording() {
-        audioEngine.stop()
-        recognitionRequest?.endAudio()
-        isRecording = false
-    }
-    
-    // MARK: - Phase 2: ElevenLabs TTS (고품질, 유료)
-    private var audioPlayer: AVAudioPlayer?
-
-    func speakWithElevenLabs(_ text: String) async throws {
-        print("[VoiceService] ElevenLabs 요청 시작 - voiceID: \(APIConfig.elevenLabsVoiceID)")
-        print("[VoiceService] ElevenLabs 텍스트: \(text.prefix(200))...")
-
-        let url = URL(string: "https://api.elevenlabs.io/v1/text-to-speech/\(APIConfig.elevenLabsVoiceID)")!
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(APIConfig.elevenLabsAPIKey, forHTTPHeaderField: "xi-api-key")
-
-        let body: [String: Any] = [
-            "text": text,
-            "model_id": "eleven_multilingual_v2",
-            "voice_settings": [
-                "stability": 0.82,
-                "similarity_boost": 0.7,
-                "style": 0.15,
-                "use_speaker_boost": false
-            ]
-        ]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        if let httpResponse = response as? HTTPURLResponse {
-            print("[VoiceService] ElevenLabs 응답 코드: \(httpResponse.statusCode), 데이터 크기: \(data.count) bytes")
-            if httpResponse.statusCode != 200 {
-                let errorBody = String(data: data, encoding: .utf8) ?? "unknown"
-                print("[VoiceService] ElevenLabs 에러 응답: \(errorBody)")
-                throw NSError(domain: "ElevenLabs", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: errorBody])
-            }
-        }
-
-        configureAudioSessionForPlayback()
+        cleanupRecording()
         DispatchQueue.main.async {
-            self.isSpeaking = true
+            self.isRecording = false
         }
-        audioPlayer = try AVAudioPlayer(data: data)
-        audioPlayer?.delegate = self
-        audioPlayer?.play()
-        print("[VoiceService] ElevenLabs 오디오 재생 시작 - duration: \(audioPlayer?.duration ?? 0)초")
+    }
+
+    private func cleanupRecording() {
+        audioEngine?.inputNode.removeTap(onBus: 0)
+        audioEngine?.stop()
+        audioEngine = nil
+        recognitionRequest?.endAudio()
+        recognitionRequest = nil
+        recognitionTask?.cancel()
+        recognitionTask = nil
     }
 }
 
 // MARK: - AVSpeechSynthesizerDelegate
 extension VoiceService: AVSpeechSynthesizerDelegate {
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        print("[VoiceService] Apple TTS 재생 완료")
-        DispatchQueue.main.async {
-            self.isSpeaking = false
-        }
-    }
-}
-
-// MARK: - AVAudioPlayerDelegate
-extension VoiceService: AVAudioPlayerDelegate {
-    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        print("[VoiceService] ElevenLabs 오디오 재생 완료 - success: \(flag)")
-        DispatchQueue.main.async {
-            self.isSpeaking = false
+        // 마지막 utterance가 끝났을 때만 isSpeaking = false
+        if !synthesizer.isSpeaking {
+            DispatchQueue.main.async {
+                self.isSpeaking = false
+            }
         }
     }
 }
